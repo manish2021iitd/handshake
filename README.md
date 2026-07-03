@@ -1,4 +1,4 @@
-# <img width="1024" height="1024" alt="handshake-avatar" src="https://github.com/user-attachments/assets/23933881-0e68-4335-a4af-016c436fb03e" /> Handshake
+# <img width="250" height="250" alt="handshake-avatar" src="https://github.com/user-attachments/assets/23933881-0e68-4335-a4af-016c436fb03e" /> Handshake
 
 ![CAP audit badge](docs/badge-example.svg)
 
