@@ -2,9 +2,11 @@
 
 ![CAP audit badge](docs/badge-example.svg)
 
-**The conformance auditor for the CROO agent economy.** Handshake is a CAP agent that other agents hire — over CAP itself — to prove they implement CAP correctly. It places real micro-orders against a target service, walks the full **Negotiate → Lock → Deliver → Clear** lifecycle, verifies every observable property (escrow accounting, SLA, delivery `contentHash`, settlement, refund path, error handling), and delivers an **Ed25519-signed conformance report + badge** as the CAP deliverable.
+**The conformance auditor for the CROO agent economy — live on Base.** Handshake is a CAP agent that other agents hire — over CAP itself — to prove they implement CAP correctly. It places real micro-orders against a target service, walks the full **Negotiate → Lock → Deliver → Clear** lifecycle, verifies every observable property (escrow accounting, SLA, delivery `contentHash`, settlement, refund path, error handling), and delivers an **Ed25519-signed conformance report + badge** as the CAP deliverable.
 
-Built against the real [`@croo-network/sdk@0.2.1`](https://www.npmjs.com/package/@croo-network/sdk) types and errors. Runs today against an in-memory CAP simulator; goes live with zero adapter code.
+Built against the real [`@croo-network/sdk@0.2.1`](https://www.npmjs.com/package/@croo-network/sdk) types and errors. The full engine runs against an in-memory CAP simulator; the same runner goes live with zero adapter code.
+
+> **Agent Store:** service `33cacab4-2b84-463e-ba0d-9483cb2682ce` · "CAP Conformance Audit" · 3 USDC
 
 ## Why this exists
 
@@ -22,7 +24,24 @@ handshake ──(#3 refund probe, 1 USDC in → 1 USDC back)▶ target
 
 One purchase fans out into **three real CAP orders** and ~11 on-chain transactions. The report itself is the deliverable of order #1 — its `contentHash` is on-chain, and its Ed25519 signature verifies offline. Handshake is simultaneously a **provider** (selling audits) and a **requester** (probing targets): A2A composability in one loop.
 
-## Quickstart
+## Hire Handshake
+
+Negotiate the service above with requirements JSON:
+
+```json
+{ "targetServiceId": "<service you want audited>", "expectedPrice": "<its advertised price, USDC base units>", "allowRefundProbe": false }
+```
+
+```ts
+await client.negotiateOrder({
+  serviceId: '33cacab4-2b84-463e-ba0d-9483cb2682ce',
+  requirements: JSON.stringify({ targetServiceId: 'svc_…', expectedPrice: '1000000' }),
+});
+```
+
+You get back a signed report JSON. Verify it with `verifySignedReport()` from this repo — or independently: Ed25519 over the sorted-keys canonical JSON of `report`, public key included in the payload.
+
+## Quickstart (mock bench — no network, no funds)
 
 ```bash
 npm install
@@ -34,7 +53,7 @@ npm run audit:overprice  # bait-and-switch pricing → H04 FAIL, aborted BEFORE 
 npm run audit:ghost      # unresponsive provider   → H02 FAIL, zero funds at risk
 ```
 
-Verified output from `npm run demo` (mock network, real SDK types):
+Verified output from `npm run demo`:
 
 ```
 VERDICT: CONFORMANT  score 100/100  (18 pass · 0 fail · 0 skip)
@@ -44,7 +63,7 @@ customer  97.00 USDC (−3.00) · handshake 102.00 USDC (+2.00) · good-provider
 
 ## The conformance suite
 
-Score is severity-weighted (critical=3, major=2, minor=1) over executed checks. Any critical failure forces verdict `FAILED`; ≥90 with no critical failures is `CONFORMANT`.
+Score is severity-weighted (critical=3, major=2, minor=1) over executed checks. Any critical failure forces verdict `FAILED` — a forged delivery proof cannot be averaged away by seventeen passing checks. ≥90 with no critical failures is `CONFORMANT`.
 
 | ID | Sev | Proves |
 |----|-----|--------|
@@ -85,7 +104,7 @@ src/
                       escrow ledger, five adversarial provider profiles
     client.ts         MockAgentClient — same CapClient interface, per-agent identity
     fixtures.ts       Test bench + Handshake's own sellable audit service
-  cli.ts              npx tsx src/cli.ts --mock tamper | --live --service … --price …
+  cli.ts              Audit CLI (mock profiles or --live)
   provider.ts         Live loop: sell audits on mainnet via WebSocket events
 scripts/demo.ts       The three-order self-sale story
 test/                 14 tests incl. every failure profile + full e2e
@@ -105,14 +124,25 @@ The design bet: **the mock speaks the SDK's exact dialect** — same `Order`/`Ne
 
 ## Going live on Base
 
-Full walkthrough in [`docs/INTEGRATION.md`](docs/INTEGRATION.md). Short version: register the agent + the "CAP Conformance Audit" service on the [dashboard](https://agent.croo.network), deposit a small USDC float to the agent's **vault address**, set `.env`, then:
+Full walkthrough in [`docs/INTEGRATION.md`](docs/INTEGRATION.md): register the agent + service on the [dashboard](https://agent.croo.network), deposit a small USDC float to the agent's **vault address** (not the controller EOA), then:
 
 ```bash
-npm run provider:live                                   # start selling audits
-npm run audit:live -- --service svc_… --price 1000000   # or audit someone directly
+cp .env.example .env    # fill in CROO_SDK_KEY + HANDSHAKE_SERVICE_ID
+node --env-file=.env --import tsx src/provider.ts     # start selling audits
+node --env-file=.env --import tsx src/cli.ts --live --service <svc> --price <baseUnits> --no-probes
 ```
 
-Buyers negotiate with requirements JSON: `{"targetServiceId": "svc_…", "expectedPrice": "1000000", "allowRefundProbe": false}`.
+Success signal for the provider: `selling CAP Conformance Audit as service … — waiting for orders`.
+
+## Integration notes (field-tested against the live API)
+
+Things the docs don't tell you, discovered by running against mainnet:
+
+1. **`listOrders` / `listNegotiations` require a `role` param** (`requester` or `provider`) — the live API returns `INVALID_PARAMETERS` without it, while omission is harmless in most SDK examples. This repo always passes `role`.
+2. **The SDK logs your full key at startup** — the WebSocket URL (`wss://…/ws?key=croo_sk_…`) is printed on connect. Never screen-record or paste provider startup output; rotate the key in the dashboard if it leaks.
+3. **Env var naming:** the dashboard quickstart shows `CROO_API_KEY` (and a Python `pip install croo-sdk` path). This repo uses the Node SDK, which authenticates with the same `croo_sk_…` value as `CROO_SDK_KEY` — the name in CROO's own Node quickstart.
+4. **Deposit USDC to the vault address**, not the controller wallet you log in with — `payOrder` spends from the agent's ERC-4337 vault, and funds sent to the controller are invisible to it.
+5. **`deliveryWindow` units:** seconds on the live network; the mock interprets it as milliseconds so the full lifecycle runs sub-second in tests.
 
 ## The refund-probe protocol (H15)
 
@@ -129,27 +159,11 @@ Escrow's whole promise is the refund path — so Handshake tests it with real mo
 | `APIError` guards: `isNotFound`, `isInvalidStatus`, `isForbidden`, `isInvalidParams`, `isInsufficientBalance` | probe verdicts in `runner.ts`; thrown natively by the mock |
 | `DeliverableType`, `OrderStatus`, `NegotiationStatus`, all entity types | throughout — the mock is built from the SDK's own types |
 
-## Hackathon submission checklist
-
-- [ ] **Listed on the CROO Agent Store** — register agent + "CAP Conformance Audit" service on the dashboard (`docs/INTEGRATION.md` §1)
-- [ ] **CAP-integrated: callable + settles on-chain** — `npm run provider:live`, then complete ≥1 paid order end-to-end; save the `clearTxHash`
-- [x] **Open source** — MIT, this repo (make it public before filing)
-- [ ] **≤5-min demo video + README** — script below; this README covers setup, SDK methods, integration notes
-- [ ] **BUIDL filed on DoraHacks** — tracks: *Developer Tooling* + *Data & Verification*; include repo, video, Agent Store link, and 2–3 basescan links from a real report
-
-**Judging bonus (10+ real CAP orders):** every audit sold = 2–3 orders (sale + main probe + optional refund probe). Four paying customers clears the bar; offer free launch-week audits in the hackathon Discord — every team needs both a conformance check *and* order volume before demo day, so distribution is structural.
-
-## Demo video script (≤5:00)
-
-- **0:00–0:40** — The problem: agents hiring strangers. CROO gives the rails (escrow, tx hashes); who proves a given provider honors them?
-- **0:40–1:30** — `npm run demo`: one audit purchase fans into three on-chain orders; buyer verifies `contentHash` + Ed25519 signature on camera.
-- **1:30–2:45** — The catches, live: `audit:tamper` (forged hash → FAILED), `audit:overprice` (refuses to pay, funds never move), `audit:ghost`.
-- **2:45–4:00** — Mainnet: Agent Store listing, a real paid audit, click the `clearTxHash` through to basescan, drop the badge into a team's README.
-- **4:00–5:00** — Why it composes: auditor is provider *and* requester; every team on the network is a customer; judges can see our order volume in the CAP data itself.
+**10+ real CAP orders:** every audit sold = 2–3 orders (sale + main probe + optional refund probe). Four paying customers clears the bar; offer free launch-week audits in the hackathon Discord — every team needs both a conformance check *and* order volume before demo day, so distribution is structural.
 
 ## Economics & safety
 
-Price each audit ≥ (target's price × 2 probe orders) + margin — e.g. a 3 USDC audit of a 1 USDC service nets +1 USDC before fees, since the refund probe returns to the wallet. Gas is currently sponsored network-wide; when that ends, add per-order gas headroom to the formula — the unit economics survive. Run the auditor from a **dedicated agent wallet with a small float** (it intentionally sends funds to unaudited strangers), and deposit USDC to the agent's **vault address**, not the controller EOA.
+Price each audit ≥ (target's price × 2 probe orders) + margin — e.g. a 3 USDC audit of a 1 USDC service nets +1 USDC before fees, since the refund probe returns to the wallet. Gas is currently sponsored network-wide; when sponsorship ends, add per-order gas headroom to the formula — the unit economics survive. Run the auditor from a **dedicated agent wallet with a small float** (it intentionally sends funds to unaudited strangers), and deposit USDC to the agent's **vault address**, not the controller EOA.
 
 ## Roadmap
 
