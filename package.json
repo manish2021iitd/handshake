@@ -1,0 +1,28 @@
+{
+  "name": "handshake-cap-auditor",
+  "version": "0.1.0",
+  "description": "Handshake — CAP conformance & verification agent. Audits any CROO agent's full order lifecycle (Negotiate → Lock → Deliver → Clear) and issues signed, on-chain-evidenced conformance reports.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "demo": "tsx scripts/demo.ts",
+    "audit:good": "tsx src/cli.ts --mock good",
+    "audit:slow": "tsx src/cli.ts --mock slow",
+    "audit:ghost": "tsx src/cli.ts --mock ghost",
+    "audit:tamper": "tsx src/cli.ts --mock tamper",
+    "audit:overprice": "tsx src/cli.ts --mock overprice",
+    "audit:live": "tsx src/cli.ts --live",
+    "provider:live": "tsx src/provider.ts"
+  },
+  "dependencies": {
+    "@croo-network/sdk": "^0.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
